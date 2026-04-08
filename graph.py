@@ -182,44 +182,50 @@ def generate_graph(seed: int):
     weather_map_clear = {n: "Clear" for n in graph_nodes}
     optimal_clear_time = dijkstra_shortest_time("N0", "N15", graph_nodes, adjacency, weather_map_clear, {})
 
-    # Fuel budget: generous to allow exploration mistakes
-    baseline_fuel = optimal_clear_time * 2.0 + 50.0
+    # Fuel budgets scaled per difficulty
+    baseline_fuel = optimal_clear_time * 1.8 + 40.0
 
     all_tasks = {
         "1_easy_clear_path": ScenarioTemplate(
             name="1_easy_clear_path",
             description="Clear skies, light traffic. Find the shortest path from N0 to N15.",
             start_node="N0", destination_node="N15",
-            deadline_minutes=optimal_clear_time * 2 + 100,
-            initial_fuel=baseline_fuel * 1.5,
+            deadline_minutes=int(optimal_clear_time * 2.5 + 80),
+            initial_fuel=baseline_fuel * 1.8,
             initial_weather={"NW": "Clear", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
         ),
         "2_medium_congestion": ScenarioTemplate(
             name="2_medium_congestion",
-            description="Severe traffic blocks the central corridor. Find an efficient detour.",
+            description="Severe traffic on the central corridor. No directional hints — navigate by coordinates.",
             start_node="N0", destination_node="N15",
-            deadline_minutes=optimal_clear_time * 2 + 60,
+            deadline_minutes=int(optimal_clear_time * 1.6 + 30),
             initial_fuel=baseline_fuel * 1.3,
             initial_weather={"NW": "Clear", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
-            traffic_schedule=[TrafficEvent(0, "N5->N6", "Severe", 999)],
+            traffic_schedule=[
+                TrafficEvent(0, "N5->N6", "Severe", 999),
+                TrafficEvent(0, "N9->N10", "Heavy", 999),
+            ],
         ),
         "3_hard_strategic_wait": ScenarioTemplate(
             name="3_hard_strategic_wait",
-            description="Storm blocks NW region at start but clears mid-episode. Wait or detour?",
+            description="Storm blocks NW at start. No directional hints — wait for weather or find a path using coordinates.",
             start_node="N0", destination_node="N15",
-            deadline_minutes=optimal_clear_time * 2 + 80,
-            initial_fuel=baseline_fuel * 1.2,
+            deadline_minutes=int(optimal_clear_time * 1.4 + 60),
+            initial_fuel=baseline_fuel * 1.1,
             initial_weather={"NW": "Storm", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
             weather_schedule=[WeatherEvent(40, "NW", "Clear")],
         ),
         "4_frontier_greedy_trap": ScenarioTemplate(
             name="4_frontier_greedy_trap",
-            description="Storm hits SE mid-route, trapping greedy agents near the destination.",
+            description="Storm hits SE mid-route. No direction hints. Greedy path is a trap — plan ahead.",
             start_node="N0", destination_node="N15",
-            deadline_minutes=optimal_clear_time * 2 + 40,
-            initial_fuel=baseline_fuel,
+            deadline_minutes=int(optimal_clear_time * 1.3 + 20),
+            initial_fuel=baseline_fuel * 1.0,
             initial_weather={"NW": "Clear", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
-            weather_schedule=[WeatherEvent(25, "SE", "Storm"), WeatherEvent(150, "SE", "Clear")],
+            weather_schedule=[
+                WeatherEvent(60, "SE", "Storm"),
+                WeatherEvent(180, "SE", "Clear"),
+            ],
         ),
     }
 

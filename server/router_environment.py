@@ -330,28 +330,55 @@ class RouterEnvironment(Environment):
         )
 
     def _render_message(self, routes: list[RouteOption], alerts: list[str], current_dist: int) -> str:
+        """Render the observation message with task-dependent information levels.
+
+        Easy:     Full coords + CLOSER/farther hints + distance count
+        Medium:   Grid coords only (no CLOSER, no distance) — agent computes direction
+        Hard:     Grid coords only + must reason about weather trends
+        Frontier: Grid coords only + storm trap requires counter-intuitive planning
+        """
         cur_r, cur_c = self._node_grid_pos(self.current_node)
         dst_r, dst_c = self._node_grid_pos(self.destination)
-        lines = [
-            f"Truck at {self.current_node} (row {cur_r}, col {cur_c}). Destination: {self.destination} (row {dst_r}, col {dst_c}).",
-            f"Distance to destination: {current_dist} hops.",
-            f"Time remaining: {max(0, self.deadline - self.elapsed)} min. | Fuel: {round(max(0, self.fuel), 1)} liters",
-            "",
-            "Route options:",
-        ]
+
+        # --- Header: always show coords, but distance only for easy ---
+        if self.task_name == "1_easy_clear_path":
+            lines = [
+                f"Truck at {self.current_node} (row {cur_r}, col {cur_c}). Destination: {self.destination} (row {dst_r}, col {dst_c}).",
+                f"Distance to destination: {current_dist} hops.",
+                f"Time remaining: {max(0, self.deadline - self.elapsed)} min. | Fuel: {round(max(0, self.fuel), 1)} liters",
+                "",
+                "Route options:",
+            ]
+        else:
+            # Medium, Hard, Frontier: coords shown, no distance count
+            lines = [
+                f"Truck at {self.current_node} (row {cur_r}, col {cur_c}). Destination: {self.destination} (row {dst_r}, col {dst_c}).",
+                f"Time remaining: {max(0, self.deadline - self.elapsed)} min. | Fuel: {round(max(0, self.fuel), 1)} liters",
+                "",
+                "Route options:",
+            ]
+
+        # --- Route options: CLOSER hint only for easy ---
         for index, route in enumerate(routes, 1):
-            next_dist = self._manhattan_distance(route.to_node, self.destination)
-            if next_dist < current_dist:
-                direction = "CLOSER to destination"
-            elif next_dist > current_dist:
-                direction = "farther from destination"
-            else:
-                direction = "same distance"
             nr, nc = self._node_grid_pos(route.to_node)
+
+            # Build direction label (Easy only)
+            if self.task_name == "1_easy_clear_path":
+                next_dist = self._manhattan_distance(route.to_node, self.destination)
+                if next_dist < current_dist:
+                    direction = ", CLOSER to destination"
+                elif next_dist > current_dist:
+                    direction = ", farther from destination"
+                else:
+                    direction = ", same distance"
+            else:
+                direction = ""  # No directional hint for Medium/Hard/Frontier
+
+            coord_label = f"row {nr}, col {nc}{direction}"
 
             if route.edge_status == "blocked":
                 lines.append(
-                    f"  {index}. {self.current_node}->{route.to_node} (row {nr}, col {nc}, {direction}) | "
+                    f"  {index}. {self.current_node}->{route.to_node} ({coord_label}) | "
                     f"BLOCKED ({route.weather})"
                 )
             else:
@@ -361,7 +388,7 @@ class RouterEnvironment(Environment):
                     else ""
                 )
                 lines.append(
-                    f"  {index}. {self.current_node}->{route.to_node} (row {nr}, col {nc}, {direction}) | "
+                    f"  {index}. {self.current_node}->{route.to_node} ({coord_label}) | "
                     f"ETA {route.eta_to_next_node} min{delay} | "
                     f"Fuel {route.fuel_cost_estimate} | "
                     f"weather {route.weather} | risk {route.risk_level} | "
