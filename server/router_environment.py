@@ -414,7 +414,7 @@ class RouterEnvironment(Environment):
 
     def _compute_final_score(self) -> float:
         if self.fuel <= 0:
-            return 0.0
+            return 0.01
             
         time_left = max(0, self.deadline - self.elapsed)
         timeliness = time_left / self.deadline
@@ -436,7 +436,7 @@ class RouterEnvironment(Environment):
         else:
             score = 0.50 * timeliness + 0.30 * safety + 0.20 * efficiency
 
-        return round(max(0.0, min(1.0, score)), 4)
+        return round(max(0.01, min(0.99, score)), 4)
 
     def _apply_schedules(self):
         if not self.scenario:
