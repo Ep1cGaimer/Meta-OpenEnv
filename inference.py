@@ -156,7 +156,7 @@ async def run_task(llm_client: OpenAI, env: RouterEnv, task_name: str) -> None:
     """Run one task scenario through the LLM agent."""
     rewards: List[float] = []
     steps_taken = 0
-    score = 0.0
+    score = 0.01
     success = False
 
     log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
@@ -187,8 +187,8 @@ async def run_task(llm_client: OpenAI, env: RouterEnv, task_name: str) -> None:
                 time.sleep(REQUEST_DELAY)
 
         # Final score is the reward from the last step (episode final score on arrival)
-        score = rewards[-1] if rewards else 0.0
-        score = max(0.0, min(1.0, score))
+        score = rewards[-1] if rewards else 0.01
+        score = max(0.01, min(0.99, score))
         success = score > 0.1
 
     except Exception as exc:
