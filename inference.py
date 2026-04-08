@@ -7,8 +7,8 @@ Runs the LLM agent through all 4 task scenarios, logging in the exact
 Env vars (set by evaluator):
     API_BASE_URL   LLM endpoint
     MODEL_NAME     Model ID
-    HF_TOKEN       API key
-    IMAGE_NAME     Docker image name (if using from_docker_image)
+    HF_TOKEN          API key
+    LOCAL_IMAGE_NAME  Docker image name (if using from_docker_image)
 """
 
 import asyncio
@@ -27,7 +27,7 @@ load_dotenv()
 from client import RouterEnv
 from models import RouterAction
 
-IMAGE_NAME = os.getenv("IMAGE_NAME")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
@@ -202,8 +202,8 @@ async def main() -> None:
     llm_client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
     # Connect to environment — via Docker image or local server
-    if IMAGE_NAME:
-        env = await RouterEnv.from_docker_image(IMAGE_NAME)
+    if LOCAL_IMAGE_NAME:
+        env = await RouterEnv.from_docker_image(LOCAL_IMAGE_NAME)
     else:
         base_url = os.getenv("ENV_BASE_URL", "http://localhost:8000")
         env = RouterEnv(base_url=base_url)
