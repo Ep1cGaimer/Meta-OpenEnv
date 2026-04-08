@@ -29,15 +29,16 @@ def grade_episode(
     efficiency = min(1.0, baseline_time / max(1, elapsed)) if baseline_time < 999999 else 0.5
 
     # Weight components based on what each task tests
-    if task_name == "congestion_avoidance":
-        # Emphasize timeliness and efficiency — weather is benign
-        score = 0.45 * timeliness + 0.15 * safety + 0.40 * efficiency
-    elif task_name == "severe_weather_detour":
-        # Safety-first — did the agent avoid dangerous routes?
-        score = 0.30 * timeliness + 0.50 * safety + 0.20 * efficiency
-    elif task_name == "strategic_waiting":
-        # Balanced — did the agent wait wisely and still arrive efficiently?
-        score = 0.40 * timeliness + 0.30 * safety + 0.30 * efficiency
+    if task_name == "1_easy_clear_path":
+        score = 0.50 * timeliness + 0.20 * safety + 0.30 * efficiency
+    elif task_name == "2_medium_congestion":
+        score = 0.40 * timeliness + 0.20 * safety + 0.40 * efficiency
+    elif task_name == "3_hard_strategic_wait":
+        score = 0.30 * timeliness + 0.30 * safety + 0.40 * efficiency
+    elif task_name == "4_frontier_greedy_trap":
+        score = 0.20 * timeliness + 0.50 * safety + 0.30 * efficiency
+    elif task_name == "5_impossible_dynamic_maze":
+        score = 0.40 * timeliness + 0.40 * safety + 0.20 * efficiency
     else:
         # Default balanced weights
         score = 0.50 * timeliness + 0.30 * safety + 0.20 * efficiency

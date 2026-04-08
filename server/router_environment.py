@@ -17,32 +17,28 @@ from openenv.core.env_server.types import State
 try:
     from ..models import RouteOption, RouterAction, RouterObservation
     from ..graph import (
-        ADJACENCY,
-        ALL_TASKS,
-        GRAPH_NODES,
-        NODE_TO_REGION,
-        TRAFFIC_PENALTY,
         WEATHER_LEVELS,
+        TRAFFIC_PENALTY,
         ScenarioTemplate,
         compute_edge_eta,
+        compute_edge_fuel,
         dijkstra_shortest_time,
         get_risk_level,
         is_edge_blocked,
+        generate_graph,
     )
 except ImportError:
     from models import RouteOption, RouterAction, RouterObservation
     from graph import (
-        ADJACENCY,
-        ALL_TASKS,
-        GRAPH_NODES,
-        NODE_TO_REGION,
-        TRAFFIC_PENALTY,
         WEATHER_LEVELS,
+        TRAFFIC_PENALTY,
         ScenarioTemplate,
         compute_edge_eta,
+        compute_edge_fuel,
         dijkstra_shortest_time,
         get_risk_level,
         is_edge_blocked,
+        generate_graph,
     )
 
 
@@ -56,6 +52,7 @@ class RouterEnvironment(Environment):
         self.destination = ""
         self.deadline = 0
         self.elapsed = 0
+        self.fuel = 0.0
         self.arrived = False
         self.failed = False
         self.task_name = ""
@@ -70,6 +67,11 @@ class RouterEnvironment(Environment):
         self.scenario: ScenarioTemplate | None = None
         self.baseline_time: int = 0
         self.rng = random.Random(42)
+        
+        # Dynamic Graph Properties
+        self.graph_nodes = []
+        self.adjacency = {}
+        self.node_to_region = {}
 
     def reset(
         self,
@@ -78,45 +80,43 @@ class RouterEnvironment(Environment):
         task_name: str | None = None,
     ) -> RouterObservation:
         resolved_task_name = task_name or os.environ.get(
-            "TASK_NAME", "congestion_avoidance"
+            "TASK_NAME", "1_easy_clear_path"
         )
         resolved_seed = (
             seed if seed is not None else int(os.environ.get("EPISODE_SEED", "42"))
         )
 
-        # 1. Initialize the Random Number Generator with the seed
         self.rng = random.Random(resolved_seed)
+        
+        # 1. Dynamically Generate the 25-node grid for this specific seed!
+        (self.graph_nodes, self.adjacency, self.node_to_region, 
+         _, all_tasks) = generate_graph(resolved_seed)
 
         # 2. Fetch the base hard-coded template
-        base_scenario = ALL_TASKS.get(resolved_task_name, list(ALL_TASKS.values())[0])
+        base_scenario = all_tasks.get(resolved_task_name, list(all_tasks.values())[0])
 
         # 3. CRITICAL: Deep copy the scenario so we don't mutate the global templates!
         self.scenario = copy.deepcopy(base_scenario)
         self.task_name = self.scenario.name
 
-        # 4. APPLY SEEDED RANDOMNESS (JITTER) TO WEATHER
-        # Shift weather events backward or forward by up to 10 minutes
+        # 4. Jitter weather
         for event in self.scenario.weather_schedule:
             jitter = self.rng.randint(-10, 10)
-            # Ensure time doesn't drop below 0
             event.tick = max(0, event.tick + jitter) 
 
-        # 5. APPLY SEEDED RANDOMNESS (JITTER) TO TRAFFIC
+        # 5. Jitter traffic
         for event in self.scenario.traffic_schedule:
             start_jitter = self.rng.randint(-5, 15)
             duration_jitter = self.rng.randint(-20, 20)
-            
             event.tick = max(0, event.tick + start_jitter)
-            
-            # If duration is 999 (permanent), leave it alone. Otherwise, jitter it.
             if event.duration < 900: 
                 event.duration = max(10, event.duration + duration_jitter)
 
-        # 6. Proceed with the rest of the standard reset logic
         self._state = State(episode_id=episode_id or str(uuid4()), step_count=0)
         self.current_node = self.scenario.start_node
         self.destination = self.scenario.destination_node
         self.deadline = self.scenario.deadline_minutes
+        self.fuel = self.scenario.initial_fuel
         self.elapsed = 0
         self.arrived = False
         self.failed = False
@@ -131,14 +131,12 @@ class RouterEnvironment(Environment):
 
         node_weather = self._get_node_weather_map()
         baseline_initial = dijkstra_shortest_time(
-            self.current_node, self.destination, node_weather, self.traffic_map
+            self.current_node, self.destination, self.graph_nodes, self.adjacency, node_weather, self.traffic_map
         )
 
-        # Also compute baseline under clear conditions — accounts for scenarios
-        # where waiting for weather to clear yields a faster optimal path
-        clear_weather = {node: "Clear" for node in GRAPH_NODES}
+        clear_weather = {node: "Clear" for node in self.graph_nodes}
         baseline_clear = dijkstra_shortest_time(
-            self.current_node, self.destination, clear_weather, {}
+            self.current_node, self.destination, self.graph_nodes, self.adjacency, clear_weather, {}
         )
         self.baseline_time = min(baseline_initial, baseline_clear)
 
@@ -160,7 +158,7 @@ class RouterEnvironment(Environment):
         return self._build_observation(reward=0.0, done=False)
 
     def _handle_move(self, target: str) -> RouterObservation:
-        edges = ADJACENCY.get(self.current_node, [])
+        edges = self.adjacency.get(self.current_node, [])
         edge = next((edge for edge in edges if edge.to_node == target), None)
         self.last_action_error = ""
 
@@ -183,7 +181,10 @@ class RouterEnvironment(Environment):
 
         traffic = self.traffic_map.get(f"{self.current_node}->{target}", "None")
         travel_time = compute_edge_eta(edge, target_weather, traffic)
+        fuel_cost = compute_edge_fuel(edge, target_weather, traffic)
+        
         self.elapsed += travel_time
+        self.fuel -= fuel_cost
         self._apply_schedules()
 
         risk = get_risk_level(edge, target_weather, traffic)
@@ -196,8 +197,13 @@ class RouterEnvironment(Environment):
         self.path_history.append(target)
         self.last_action_summary = (
             f"Moved {self.path_history[-2]}->{target} in {travel_time} min. "
-            f"Weather: {target_weather}, Traffic: {traffic}."
+            f"Burned {fuel_cost} Fuel. Weather: {target_weather}, Traffic: {traffic}."
         )
+
+        if self.fuel <= 0:
+            self.failed = True
+            self.last_action_error = "CRITICAL FAILURE: OUT OF FUEL."
+            return self._build_observation(reward=0.0, done=True)
 
         if self.current_node == self.destination:
             self.arrived = True
@@ -221,8 +227,16 @@ class RouterEnvironment(Environment):
             minutes = 10
 
         self.elapsed += minutes
+        fuel_cost = 0.1 * minutes
+        self.fuel -= fuel_cost
+        
         self._apply_schedules()
-        self.last_action_summary = f"Waited {minutes} min at {self.current_node}."
+        self.last_action_summary = f"Waited {minutes} min at {self.current_node}. Burned {fuel_cost} Fuel (Idling)."
+
+        if self.fuel <= 0:
+            self.failed = True
+            self.last_action_error = "CRITICAL FAILURE: OUT OF FUEL."
+            return self._build_observation(reward=0.0, done=True)
 
         if self.elapsed >= self.deadline:
             self.failed = True
@@ -238,12 +252,13 @@ class RouterEnvironment(Environment):
         action_list = []
         alerts: list[str] = []
 
-        for edge in ADJACENCY.get(self.current_node, []):
+        for edge in self.adjacency.get(self.current_node, []):
             weather = self._node_weather(edge.to_node)
             traffic = self.traffic_map.get(f"{edge.from_node}->{edge.to_node}", "None")
             blocked = is_edge_blocked(edge, weather)
             risk = get_risk_level(edge, weather, traffic)
             eta = compute_edge_eta(edge, weather, traffic) if not blocked else 9999
+            fuel_est = compute_edge_fuel(edge, weather, traffic) if not blocked else 9999
             status = (
                 "blocked"
                 if blocked
@@ -260,6 +275,7 @@ class RouterEnvironment(Environment):
                     risk_level=risk,
                     edge_status=status,
                     eta_to_next_node=eta,
+                    fuel_cost_estimate=fuel_est,
                     trend=trend,
                 )
             )
@@ -284,6 +300,7 @@ class RouterEnvironment(Environment):
             destination=self.destination,
             time_remaining_minutes=max(0, self.deadline - self.elapsed),
             elapsed_minutes=self.elapsed,
+            fuel_remaining=round(self.fuel, 2),
             route_options=route_options,
             available_actions=action_list,
             last_action_summary=self.last_action_summary,
@@ -296,13 +313,14 @@ class RouterEnvironment(Environment):
                 "task_name": self.task_name,
                 "deadline_minutes": self.deadline,
                 "baseline_time_minutes": self.baseline_time,
+                "baseline_fuel": getattr(self.scenario, 'initial_fuel', 0.0),
             },
         )
 
     def _render_message(self, routes: list[RouteOption], alerts: list[str]) -> str:
         lines = [
-            f"Truck at {self.current_node}. Destination: {self.destination}. "
-            f"Time remaining: {max(0, self.deadline - self.elapsed)} min.",
+            f"Truck at {self.current_node}. Destination: {self.destination}.",
+            f"Time remaining: {max(0, self.deadline - self.elapsed)} min. | FULLY FUELED Gauge: {round(max(0, self.fuel), 1)} liters",
             "",
             "Route options:",
         ]
@@ -321,6 +339,7 @@ class RouterEnvironment(Environment):
                 lines.append(
                     f"  {index}. {self.current_node}->{route.to_node} | "
                     f"ETA {route.eta_to_next_node} min{delay} | "
+                    f"Fuel {route.fuel_cost_estimate} | "
                     f"weather {route.weather} | risk {route.risk_level} | "
                     f"trend {route.trend}"
                 )
@@ -343,6 +362,9 @@ class RouterEnvironment(Environment):
         return "\n".join(lines)
 
     def _compute_final_score(self) -> float:
+        if self.fuel <= 0:
+            return 0.0
+            
         time_left = max(0, self.deadline - self.elapsed)
         timeliness = time_left / self.deadline
         safety = max(0.0, 1.0 - self.safety_penalties)
@@ -352,13 +374,16 @@ class RouterEnvironment(Environment):
         else:
             efficiency = 0.5
 
-        # Per-task scoring weights matching the design doc
-        if self.task_name == "congestion_avoidance":
-            score = 0.45 * timeliness + 0.15 * safety + 0.40 * efficiency
-        elif self.task_name == "severe_weather_detour":
-            score = 0.30 * timeliness + 0.50 * safety + 0.20 * efficiency
-        elif self.task_name == "strategic_waiting":
-            score = 0.40 * timeliness + 0.30 * safety + 0.30 * efficiency
+        if self.task_name == "1_easy_clear_path":
+            score = 0.50 * timeliness + 0.20 * safety + 0.30 * efficiency
+        elif self.task_name == "2_medium_congestion":
+            score = 0.40 * timeliness + 0.20 * safety + 0.40 * efficiency
+        elif self.task_name == "3_hard_strategic_wait":
+            score = 0.30 * timeliness + 0.30 * safety + 0.40 * efficiency
+        elif self.task_name == "4_frontier_greedy_trap":
+            score = 0.20 * timeliness + 0.50 * safety + 0.30 * efficiency
+        elif self.task_name == "5_impossible_dynamic_maze":
+            score = 0.40 * timeliness + 0.40 * safety + 0.20 * efficiency
         else:
             score = 0.50 * timeliness + 0.30 * safety + 0.20 * efficiency
 
@@ -380,17 +405,17 @@ class RouterEnvironment(Environment):
                     self.traffic_map[event.edge_key] = "None"
 
     def _node_weather(self, node: str) -> str:
-        region = NODE_TO_REGION.get(node, "inland")
+        region = self.node_to_region.get(node, "inland")
         return self.weather_map.get(region, "Clear")
 
     def _get_node_weather_map(self) -> dict[str, str]:
-        return {node: self._node_weather(node) for node in GRAPH_NODES}
+        return {node: self._node_weather(node) for node in self.graph_nodes}
 
     def _get_trend(self, node: str) -> str:
         if not self.scenario:
             return "stable"
 
-        region = NODE_TO_REGION.get(node, "inland")
+        region = self.node_to_region.get(node, "inland")
         current = self.weather_map.get(region, "Clear")
         current_idx = WEATHER_LEVELS.index(current)
 

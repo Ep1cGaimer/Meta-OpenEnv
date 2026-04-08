@@ -35,7 +35,7 @@ MAX_STEPS = 20
 TEMPERATURE = 0.3
 MAX_TOKENS = 100
 
-ALL_TASK_NAMES = ["congestion_avoidance", "severe_weather_detour", "strategic_waiting"]
+ALL_TASK_NAMES = ["1_easy_clear_path", "2_medium_congestion", "3_hard_strategic_wait", "4_frontier_greedy_trap", "5_impossible_dynamic_maze"]
 
 SYSTEM_PROMPT = textwrap.dedent("""
 You are a logistics route dispatcher. Each turn you receive a situation report

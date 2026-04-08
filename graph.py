@@ -1,119 +1,46 @@
-"""
-Graph topology, weather/traffic simulation, and scenario templates.
-
-The graph represents a small road network where each edge has properties
-that determine how weather and traffic affect travel. Scenarios are
-deterministic schedules seeded per-episode for reproducible grading.
-"""
-
 import heapq
 import random
 from dataclasses import dataclass, field
 
-
 # ---------------------------------------------------------------------------
-# Edge and graph definitions
+# Core Data Models
 # ---------------------------------------------------------------------------
 
 @dataclass
 class Edge:
     from_node: str
     to_node: str
-    base_travel_time: int       # minutes
-    road_type: str              # highway, arterial, mountain, coastal
-    weather_sensitivity: float  # 0.0-1.0, how much weather degrades this edge
-    closure_threshold: str      # weather level that blocks this edge entirely
-
-GRAPH_NODES = ["A", "B", "C", "D", "E", "F", "G", "H"]
-
-# The graph is intentionally structured:
-#   - A->B->D->F is the short/fast corridor but weather-sensitive (highway, coastal)
-#   - A->C->E->G->H->F is the long/safe corridor (arterial, inland)
-#   - Multiple branch points create real tradeoffs
-GRAPH_EDGES = [
-    # Short risky corridor (highway/coastal — storm-sensitive)
-    Edge("A", "B", 25, "highway",  0.7, "Storm"),
-    Edge("B", "A", 25, "highway",  0.7, "Storm"),
-    Edge("B", "D", 30, "coastal",  0.8, "HeavyRain"),
-    Edge("D", "B", 30, "coastal",  0.8, "HeavyRain"),
-    Edge("D", "F", 35, "highway",  0.6, "Storm"),
-    Edge("F", "D", 35, "highway",  0.6, "Storm"),
-
-    # Long safe corridor (arterial/inland — weather-resistant)
-    Edge("A", "C", 30, "arterial", 0.2, "Storm"),
-    Edge("C", "A", 30, "arterial", 0.2, "Storm"),
-    Edge("C", "E", 25, "arterial", 0.3, "Storm"),
-    Edge("E", "C", 25, "arterial", 0.3, "Storm"),
-    Edge("E", "G", 20, "arterial", 0.2, "Storm"),
-    Edge("G", "E", 20, "arterial", 0.2, "Storm"),
-    Edge("G", "H", 20, "arterial", 0.1, "Storm"),
-    Edge("H", "G", 20, "arterial", 0.1, "Storm"),
-    Edge("H", "F", 25, "arterial", 0.2, "Storm"),
-    Edge("F", "H", 25, "arterial", 0.2, "Storm"),
-
-    # Cross-links (create branch decision points)
-    Edge("B", "E", 35, "mountain", 0.5, "HeavyRain"),
-    Edge("E", "B", 35, "mountain", 0.5, "HeavyRain"),
-    Edge("C", "D", 40, "arterial", 0.4, "Storm"),
-    Edge("D", "C", 40, "arterial", 0.4, "Storm"),
-    Edge("E", "F", 45, "mountain", 0.6, "Storm"),
-    Edge("F", "E", 45, "mountain", 0.6, "Storm"),
-]
-
-
-def build_adjacency() -> dict[str, list[Edge]]:
-    """Build adjacency list from edge definitions."""
-    adj: dict[str, list[Edge]] = {n: [] for n in GRAPH_NODES}
-    for e in GRAPH_EDGES:
-        adj[e.from_node].append(e)
-    return adj
-
-
-ADJACENCY = build_adjacency()
-
-# Weather regions — nodes sharing weather patterns
-WEATHER_REGIONS = {
-    "coastal":  ["B", "D"],
-    "inland":   ["C", "E", "G"],
-    "highland": ["A", "H"],
-    "southern": ["F"],
-}
-
-# Reverse mapping: node -> region
-NODE_TO_REGION = {}
-for region, nodes in WEATHER_REGIONS.items():
-    for node in nodes:
-        NODE_TO_REGION[node] = region
+    base_travel_time: int
+    road_type: str
+    weather_sensitivity: float
+    closure_threshold: str
 
 WEATHER_LEVELS = ["Clear", "LightRain", "HeavyRain", "Storm"]
 TRAFFIC_LEVELS = ["None", "Moderate", "Heavy", "Severe"]
-
-
-# ---------------------------------------------------------------------------
-# Weather and traffic penalty calculation
-# ---------------------------------------------------------------------------
 
 WEATHER_PENALTY = {"Clear": 0, "LightRain": 5, "HeavyRain": 15, "Storm": 30}
 TRAFFIC_PENALTY = {"None": 0, "Moderate": 10, "Heavy": 25, "Severe": 45}
 WEATHER_RISK    = {"Clear": "Low", "LightRain": "Low", "HeavyRain": "Medium", "Storm": "High"}
 
-
 def compute_edge_eta(edge: Edge, weather: str, traffic: str) -> int:
-    """Total travel time for an edge given current conditions."""
     w_penalty = int(edge.weather_sensitivity * WEATHER_PENALTY.get(weather, 0))
     t_penalty = TRAFFIC_PENALTY.get(traffic, 0)
     return edge.base_travel_time + w_penalty + t_penalty
 
+def compute_edge_fuel(edge: Edge, weather: str, traffic: str) -> float:
+    cost = float(edge.base_travel_time)
+    if traffic in ("Heavy", "Severe"):
+        cost *= 1.5
+    if weather in ("HeavyRain", "Storm"):
+        cost *= 1.5
+    return round(cost, 2)
 
 def is_edge_blocked(edge: Edge, weather: str) -> bool:
-    """Check if weather has crossed this edge's closure threshold."""
     threshold_idx = WEATHER_LEVELS.index(edge.closure_threshold)
     current_idx = WEATHER_LEVELS.index(weather)
     return current_idx >= threshold_idx
 
-
 def get_risk_level(edge: Edge, weather: str, traffic: str) -> str:
-    """Determine overall risk for an edge."""
     if is_edge_blocked(edge, weather):
         return "Blocked"
     w_risk = WEATHER_RISK.get(weather, "Low")
@@ -125,22 +52,15 @@ def get_risk_level(edge: Edge, weather: str, traffic: str) -> str:
         return "Medium"
     return "Low"
 
-
-# ---------------------------------------------------------------------------
-# Dijkstra — used to compute safe baseline optimal path for scoring
-# ---------------------------------------------------------------------------
-
 def dijkstra_shortest_time(
     start: str,
     end: str,
+    graph_nodes: list[str],
+    adjacency: dict[str, list[Edge]],
     weather_map: dict[str, str],
     traffic_map: dict[str, str],
 ) -> int:
-    """
-    Shortest arrival time from start to end given current conditions.
-    Returns the time in minutes, or 999999 if unreachable.
-    """
-    dist = {n: 999999 for n in GRAPH_NODES}
+    dist = {n: 999999 for n in graph_nodes}
     dist[start] = 0
     pq = [(0, start)]
 
@@ -150,7 +70,7 @@ def dijkstra_shortest_time(
             return d
         if d > dist[node]:
             continue
-        for edge in ADJACENCY.get(node, []):
+        for edge in adjacency.get(node, []):
             w = weather_map.get(edge.to_node, "Clear")
             if is_edge_blocked(edge, w):
                 continue
@@ -161,23 +81,22 @@ def dijkstra_shortest_time(
                 heapq.heappush(pq, (cost, edge.to_node))
     return dist[end]
 
-
 # ---------------------------------------------------------------------------
-# Scenario templates — deterministic weather/traffic schedules
+# Scenarios
 # ---------------------------------------------------------------------------
 
 @dataclass
 class WeatherEvent:
-    tick: int        # simulation minute when this takes effect
+    tick: int
     region: str
-    condition: str   # one of WEATHER_LEVELS
+    condition: str
 
 @dataclass
 class TrafficEvent:
     tick: int
-    edge_key: str    # e.g. "B->D"
-    severity: str    # one of TRAFFIC_LEVELS
-    duration: int    # how many minutes this lasts
+    edge_key: str
+    severity: str
+    duration: int
 
 @dataclass
 class ScenarioTemplate:
@@ -186,96 +105,122 @@ class ScenarioTemplate:
     start_node: str
     destination_node: str
     deadline_minutes: int
-    initial_weather: dict[str, str]       # region -> condition
+    initial_fuel: float
+    initial_weather: dict[str, str]
     weather_schedule: list[WeatherEvent] = field(default_factory=list)
     traffic_schedule: list[TrafficEvent] = field(default_factory=list)
 
+# ---------------------------------------------------------------------------
+# 25-Node Dynamic Grid Generator
+# ---------------------------------------------------------------------------
 
-# --- Task 1: Congestion Avoidance ---
-# The short corridor (A->B->D->F) gets severe traffic on B->D.
-# Weather is mostly fine. Agent should detour through C or E.
-TASK_CONGESTION = ScenarioTemplate(
-    name="congestion_avoidance",
-    description="Heavy traffic blocks the fast corridor. Find an efficient detour.",
-    start_node="A",
-    destination_node="F",
-    deadline_minutes=180,
-    initial_weather={
-        "coastal": "Clear",
-        "inland": "Clear",
-        "highland": "Clear",
-        "southern": "Clear",
-    },
-    weather_schedule=[
-        # Mild rain develops on the coast at minute 60, but nothing critical
-        WeatherEvent(60, "coastal", "LightRain"),
-        WeatherEvent(120, "coastal", "Clear"),
-    ],
-    traffic_schedule=[
-        # Severe congestion on the fast route almost immediately
-        TrafficEvent(0,  "B->D", "Severe", 150),
-        # Moderate backup on D->F as well
-        TrafficEvent(20, "D->F", "Heavy", 100),
-    ],
-)
+def generate_graph(seed: int):
+    rng = random.Random(seed)
+    
+    # 5x5 Grid
+    graph_nodes = [f"N{i}" for i in range(25)]
+    adjacency = {n: [] for n in graph_nodes}
+    node_to_region = {}
+    weather_regions = {"NW": [], "NE": [], "SW": [], "SE": []}
 
-# --- Task 2: Severe Weather Detour ---
-# Storm hits the coastal corridor, blocking B->D entirely.
-# Agent must choose the safe inland route despite it being longer.
-TASK_WEATHER = ScenarioTemplate(
-    name="severe_weather_detour",
-    description="Storm blocks the coastal fast route. Prioritize safety over speed.",
-    start_node="A",
-    destination_node="F",
-    deadline_minutes=200,
-    initial_weather={
-        "coastal": "LightRain",
-        "inland": "Clear",
-        "highland": "Clear",
-        "southern": "Clear",
-    },
-    weather_schedule=[
-        # Storm develops on coast at minute 20 — blocks B->D (closure_threshold=HeavyRain)
-        WeatherEvent(20, "coastal", "HeavyRain"),
-        WeatherEvent(40, "coastal", "Storm"),
-        WeatherEvent(130, "coastal", "HeavyRain"),
-        WeatherEvent(160, "coastal", "LightRain"),
-    ],
-    traffic_schedule=[
-        # Some moderate traffic on the inland route to add realism
-        TrafficEvent(30, "C->E", "Moderate", 60),
-    ],
-)
+    def get_node(x, y):
+        return f"N{y * 5 + x}"
 
-# --- Task 3: Strategic Waiting ---
-# The best route (B->D->F) is temporarily degraded by heavy rain.
-# Rain clears within 20-30 minutes. Waiting is better than a long detour.
-TASK_WAITING = ScenarioTemplate(
-    name="strategic_waiting",
-    description="Best route temporarily degraded. Waiting for conditions to clear is optimal.",
-    start_node="A",
-    destination_node="F",
-    deadline_minutes=180,
-    initial_weather={
-        "coastal": "HeavyRain",
-        "inland": "Clear",
-        "highland": "Clear",
-        "southern": "Clear",
-    },
-    weather_schedule=[
-        # Rain clears at minute 30 — the agent starts at A, so if it waits ~20 min it can
-        # take the fast route safely
-        WeatherEvent(30, "coastal", "LightRain"),
-        WeatherEvent(50, "coastal", "Clear"),
-    ],
-    traffic_schedule=[
-        TrafficEvent(0, "B->D", "Moderate", 40),
-        TrafficEvent(40, "B->D", "None", 999),
-    ],
-)
+    # Build regions
+    for y in range(5):
+        for x in range(5):
+            node = get_node(x, y)
+            if y < 3 and x < 3:
+                r = "NW"
+            elif y < 3 and x >= 3:
+                r = "NE"
+            elif y >= 3 and x < 3:
+                r = "SW"
+            else:
+                r = "SE"
+            weather_regions[r].append(node)
+            node_to_region[node] = r
 
-ALL_TASKS = {
-    "congestion_avoidance": TASK_CONGESTION,
-    "severe_weather_detour": TASK_WEATHER,
-    "strategic_waiting": TASK_WAITING,
-}
+    # Build edges
+    road_types = ["highway", "arterial", "mountain"]
+    thresholds = ["HeavyRain", "Storm", "Storm"]
+    for y in range(5):
+        for x in range(5):
+            node = get_node(x, y)
+            neighbors = []
+            if x > 0: neighbors.append(get_node(x-1, y))
+            if x < 4: neighbors.append(get_node(x+1, y))
+            if y > 0: neighbors.append(get_node(x, y-1))
+            if y < 4: neighbors.append(get_node(x, y+1))
+            
+            for nx in neighbors:
+                # To ensure Bidirectional edges have same base cost, we seed by edge tuple
+                edge_seed = tuple(sorted([node, nx]))
+                local_rng = random.Random(hash(edge_seed) + seed)
+                base_time = local_rng.randint(15, 30)
+                rtype_idx = local_rng.randint(0, 2)
+                rtype = road_types[rtype_idx]
+                thresh = thresholds[rtype_idx]
+                sens = local_rng.uniform(0.2, 0.8)
+                
+                adjacency[node].append(Edge(node, nx, base_time, rtype, sens, thresh))
+
+    # Calculate baseline Clear Weather optimal path to F (N24)
+    weather_map_clear = {n: "Clear" for n in graph_nodes}
+    optimal_clear_time = dijkstra_shortest_time("N0", "N24", graph_nodes, adjacency, weather_map_clear, {})
+    
+    # Very tight fuel budget: Baseline time * 1.5 + small buffer
+    baseline_fuel = optimal_clear_time * 1.5 + 20.0
+
+    all_tasks = {
+        "1_easy_clear_path": ScenarioTemplate(
+            name="1_easy_clear_path",
+            description="25-Node Grid: Clear path to N24.",
+            start_node="N0", destination_node="N24",
+            deadline_minutes=optimal_clear_time + 40,
+            initial_fuel=baseline_fuel,
+            initial_weather={"NW": "Clear", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
+        ),
+        "2_medium_congestion": ScenarioTemplate(
+            name="2_medium_congestion",
+            description="25-Node Grid: Severe traffic on the diagonal.",
+            start_node="N0", destination_node="N24",
+            deadline_minutes=optimal_clear_time + 60,
+            initial_fuel=baseline_fuel + 30,
+            initial_weather={"NW": "Clear", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
+            traffic_schedule=[TrafficEvent(0, "N6->N7", "Severe", 999)],
+        ),
+        "3_hard_strategic_wait": ScenarioTemplate(
+            name="3_hard_strategic_wait",
+            description="25-Node Grid: Storm clears up halfway.",
+            start_node="N0", destination_node="N24",
+            deadline_minutes=optimal_clear_time + 80,
+            initial_fuel=baseline_fuel + 20,
+            initial_weather={"NW": "Storm", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
+            weather_schedule=[WeatherEvent(40, "NW", "Clear")],
+        ),
+        "4_frontier_greedy_trap": ScenarioTemplate(
+            name="4_frontier_greedy_trap",
+            description="25-Node Grid: Approaching storm traps greedy routing.",
+            start_node="N0", destination_node="N24",
+            deadline_minutes=optimal_clear_time + 50,
+            initial_fuel=baseline_fuel,
+            initial_weather={"NW": "Clear", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
+            weather_schedule=[WeatherEvent(30, "SE", "Storm"), WeatherEvent(180, "SE", "Clear")],
+        ),
+        "5_impossible_dynamic_maze": ScenarioTemplate(
+            name="5_impossible_dynamic_maze",
+            description="25-Node Grid: Fuel is critical and routing requires exact waiting.",
+            start_node="N0", destination_node="N24",
+            deadline_minutes=optimal_clear_time + 75,
+            initial_fuel=baseline_fuel + 5,  # Very tight fuel!
+            initial_weather={"NW": "Clear", "NE": "Storm", "SW": "Storm", "SE": "Storm"},
+            weather_schedule=[WeatherEvent(60, "SE", "Clear")],
+            traffic_schedule=[TrafficEvent(0, "N5->N10", "Severe", 100)],
+        ),
+    }
+
+    return graph_nodes, adjacency, node_to_region, weather_regions, all_tasks
+
+# Generate a default static instance for global imports to satisfy legacy code
+GRAPH_NODES, ADJACENCY, NODE_TO_REGION, WEATHER_REGIONS, ALL_TASKS = generate_graph(42)

@@ -30,6 +30,7 @@ class RouteOption(BaseModel):
     edge_status: str          # open, degraded, blocked
     eta_to_next_node: int     # base + traffic + weather penalty
     trend: str                # improving, stable, worsening
+    fuel_cost_estimate: float # Est fuel cost to traverse
 
 
 class RouterObservation(Observation):
@@ -44,6 +45,7 @@ class RouterObservation(Observation):
     destination: str = ""
     time_remaining_minutes: int = 0
     elapsed_minutes: int = 0
+    fuel_remaining: float = 0.0
     route_options: list[RouteOption] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
     last_action_summary: str = ""
