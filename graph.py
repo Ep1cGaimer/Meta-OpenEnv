@@ -211,10 +211,10 @@ def generate_graph(seed: int):
             name="3_hard_strategic_wait",
             description="Storm blocks NW at start. No directional hints — wait efficiently and navigate precisely.",
             start_node="N0", destination_node="N15",
-            deadline_minutes=int(optimal_clear_time * 1.25 + 30),
+            deadline_minutes=int(optimal_clear_time * 1.15 + 30),
             initial_fuel=baseline_fuel * 1.0,
             initial_weather={"NW": "Storm", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
-            weather_schedule=[WeatherEvent(40, "NW", "Clear")],
+            weather_schedule=[WeatherEvent(40, "NW", "HeavyRain")],
         ),
         "4_frontier_greedy_trap": ScenarioTemplate(
             name="4_frontier_greedy_trap",
