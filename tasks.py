@@ -22,7 +22,7 @@ def grade_episode(
     Returns a float in [0.0, 1.0].
     """
     if not arrived:
-        return 0.0
+        return 0.01
 
     timeliness = max(0.0, (deadline - elapsed) / deadline)
     safety = max(0.0, 1.0 - safety_penalties)
@@ -41,7 +41,7 @@ def grade_episode(
         # Default balanced weights
         score = 0.50 * timeliness + 0.30 * safety + 0.20 * efficiency
 
-    return round(max(0.0, min(1.0, score)), 4)
+    return round(max(0.01, min(0.99, score)), 4)
 
 
 TASKS = {
