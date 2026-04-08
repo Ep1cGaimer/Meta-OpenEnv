@@ -44,6 +44,7 @@ class RouterEnv(EnvClient[RouterAction, RouterObservation, State]):
             destination=obs_data.get("destination", ""),
             time_remaining_minutes=obs_data.get("time_remaining_minutes", 0),
             elapsed_minutes=obs_data.get("elapsed_minutes", 0),
+            fuel_remaining=obs_data.get("fuel_remaining", 0.0),
             route_options=route_options,
             available_actions=obs_data.get("available_actions", []),
             last_action_summary=obs_data.get("last_action_summary", ""),

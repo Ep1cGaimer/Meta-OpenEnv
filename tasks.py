@@ -1,5 +1,5 @@
 """
-Task definitions and graders for the three scenario families.
+Task definitions and graders for the four scenario families.
 
 Each grader takes final episode state and returns a score in [0.0, 1.0].
 The graders use the same base formula (timeliness + safety + efficiency)
@@ -37,8 +37,6 @@ def grade_episode(
         score = 0.30 * timeliness + 0.30 * safety + 0.40 * efficiency
     elif task_name == "4_frontier_greedy_trap":
         score = 0.20 * timeliness + 0.50 * safety + 0.30 * efficiency
-    elif task_name == "5_impossible_dynamic_maze":
-        score = 0.40 * timeliness + 0.40 * safety + 0.20 * efficiency
     else:
         # Default balanced weights
         score = 0.50 * timeliness + 0.30 * safety + 0.20 * efficiency

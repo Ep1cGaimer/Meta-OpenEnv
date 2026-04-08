@@ -247,10 +247,22 @@ class RouterEnvironment(Environment):
         )
         return self._build_observation(reward=step_reward, done=False)
 
+    def _node_grid_pos(self, node: str) -> tuple[int, int]:
+        """Return (row, col) for a node on the 4x4 grid."""
+        idx = int(node[1:])
+        return idx // 4, idx % 4
+
+    def _manhattan_distance(self, node_a: str, node_b: str) -> int:
+        """Manhattan distance between two nodes on the grid."""
+        r1, c1 = self._node_grid_pos(node_a)
+        r2, c2 = self._node_grid_pos(node_b)
+        return abs(r1 - r2) + abs(c1 - c2)
+
     def _build_observation(self, reward: float, done: bool) -> RouterObservation:
         route_options = []
         action_list = []
         alerts: list[str] = []
+        current_dist = self._manhattan_distance(self.current_node, self.destination)
 
         for edge in self.adjacency.get(self.current_node, []):
             weather = self._node_weather(edge.to_node)
@@ -293,7 +305,7 @@ class RouterEnvironment(Environment):
                 )
 
         action_list.extend(["wait(10)", "wait(20)"])
-        message = self._render_message(route_options, alerts)
+        message = self._render_message(route_options, alerts, current_dist)
 
         return RouterObservation(
             truck_location=self.current_node,
@@ -317,17 +329,29 @@ class RouterEnvironment(Environment):
             },
         )
 
-    def _render_message(self, routes: list[RouteOption], alerts: list[str]) -> str:
+    def _render_message(self, routes: list[RouteOption], alerts: list[str], current_dist: int) -> str:
+        cur_r, cur_c = self._node_grid_pos(self.current_node)
+        dst_r, dst_c = self._node_grid_pos(self.destination)
         lines = [
-            f"Truck at {self.current_node}. Destination: {self.destination}.",
-            f"Time remaining: {max(0, self.deadline - self.elapsed)} min. | FULLY FUELED Gauge: {round(max(0, self.fuel), 1)} liters",
+            f"Truck at {self.current_node} (row {cur_r}, col {cur_c}). Destination: {self.destination} (row {dst_r}, col {dst_c}).",
+            f"Distance to destination: {current_dist} hops.",
+            f"Time remaining: {max(0, self.deadline - self.elapsed)} min. | Fuel: {round(max(0, self.fuel), 1)} liters",
             "",
             "Route options:",
         ]
         for index, route in enumerate(routes, 1):
+            next_dist = self._manhattan_distance(route.to_node, self.destination)
+            if next_dist < current_dist:
+                direction = "CLOSER to destination"
+            elif next_dist > current_dist:
+                direction = "farther from destination"
+            else:
+                direction = "same distance"
+            nr, nc = self._node_grid_pos(route.to_node)
+
             if route.edge_status == "blocked":
                 lines.append(
-                    f"  {index}. {self.current_node}->{route.to_node} | "
+                    f"  {index}. {self.current_node}->{route.to_node} (row {nr}, col {nc}, {direction}) | "
                     f"BLOCKED ({route.weather})"
                 )
             else:
@@ -337,7 +361,7 @@ class RouterEnvironment(Environment):
                     else ""
                 )
                 lines.append(
-                    f"  {index}. {self.current_node}->{route.to_node} | "
+                    f"  {index}. {self.current_node}->{route.to_node} (row {nr}, col {nc}, {direction}) | "
                     f"ETA {route.eta_to_next_node} min{delay} | "
                     f"Fuel {route.fuel_cost_estimate} | "
                     f"weather {route.weather} | risk {route.risk_level} | "
@@ -382,8 +406,6 @@ class RouterEnvironment(Environment):
             score = 0.30 * timeliness + 0.30 * safety + 0.40 * efficiency
         elif self.task_name == "4_frontier_greedy_trap":
             score = 0.20 * timeliness + 0.50 * safety + 0.30 * efficiency
-        elif self.task_name == "5_impossible_dynamic_maze":
-            score = 0.40 * timeliness + 0.40 * safety + 0.20 * efficiency
         else:
             score = 0.50 * timeliness + 0.30 * safety + 0.20 * efficiency
 

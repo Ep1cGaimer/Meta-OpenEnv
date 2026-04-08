@@ -111,50 +111,63 @@ class ScenarioTemplate:
     traffic_schedule: list[TrafficEvent] = field(default_factory=list)
 
 # ---------------------------------------------------------------------------
-# 25-Node Dynamic Grid Generator
+# 16-Node (4x4) Dynamic Grid Generator
 # ---------------------------------------------------------------------------
+#
+# Grid layout:
+#   N0  N1  N2  N3
+#   N4  N5  N6  N7
+#   N8  N9  N10 N11
+#   N12 N13 N14 N15
+#
+# Weather regions:
+#   NW = {N0, N1, N4, N5}   NE = {N2, N3, N6, N7}
+#   SW = {N8, N9, N12, N13} SE = {N10, N11, N14, N15}
+#
+# Start: N0 (top-left)   Destination: N15 (bottom-right)
+# Minimum hops: 6 (3 right + 3 down)
 
 def generate_graph(seed: int):
     rng = random.Random(seed)
-    
-    # 5x5 Grid
-    graph_nodes = [f"N{i}" for i in range(25)]
-    adjacency = {n: [] for n in graph_nodes}
-    node_to_region = {}
-    weather_regions = {"NW": [], "NE": [], "SW": [], "SE": []}
 
-    def get_node(x, y):
-        return f"N{y * 5 + x}"
+    # 4×4 Grid — 16 nodes
+    graph_nodes = [f"N{i}" for i in range(16)]
+    adjacency: dict[str, list[Edge]] = {n: [] for n in graph_nodes}
+    node_to_region: dict[str, str] = {}
+    weather_regions: dict[str, list[str]] = {"NW": [], "NE": [], "SW": [], "SE": []}
 
-    # Build regions
-    for y in range(5):
-        for x in range(5):
+    def get_node(x: int, y: int) -> str:
+        return f"N{y * 4 + x}"
+
+    # Build regions (2×2 quadrants)
+    for y in range(4):
+        for x in range(4):
             node = get_node(x, y)
-            if y < 3 and x < 3:
+            if y < 2 and x < 2:
                 r = "NW"
-            elif y < 3 and x >= 3:
+            elif y < 2 and x >= 2:
                 r = "NE"
-            elif y >= 3 and x < 3:
+            elif y >= 2 and x < 2:
                 r = "SW"
             else:
                 r = "SE"
             weather_regions[r].append(node)
             node_to_region[node] = r
 
-    # Build edges
+    # Build edges — bidirectional, seeded for consistency
     road_types = ["highway", "arterial", "mountain"]
     thresholds = ["HeavyRain", "Storm", "Storm"]
-    for y in range(5):
-        for x in range(5):
+    for y in range(4):
+        for x in range(4):
             node = get_node(x, y)
             neighbors = []
             if x > 0: neighbors.append(get_node(x-1, y))
-            if x < 4: neighbors.append(get_node(x+1, y))
+            if x < 3: neighbors.append(get_node(x+1, y))
             if y > 0: neighbors.append(get_node(x, y-1))
-            if y < 4: neighbors.append(get_node(x, y+1))
-            
+            if y < 3: neighbors.append(get_node(x, y+1))
+
             for nx in neighbors:
-                # To ensure Bidirectional edges have same base cost, we seed by edge tuple
+                # Seed by sorted edge pair so bidirectional edges get same base cost
                 edge_seed = tuple(sorted([node, nx]))
                 local_rng = random.Random(hash(edge_seed) + seed)
                 base_time = local_rng.randint(15, 30)
@@ -162,65 +175,55 @@ def generate_graph(seed: int):
                 rtype = road_types[rtype_idx]
                 thresh = thresholds[rtype_idx]
                 sens = local_rng.uniform(0.2, 0.8)
-                
+
                 adjacency[node].append(Edge(node, nx, base_time, rtype, sens, thresh))
 
-    # Calculate baseline Clear Weather optimal path to F (N24)
+    # Calculate baseline clear-weather optimal path N0→N15
     weather_map_clear = {n: "Clear" for n in graph_nodes}
-    optimal_clear_time = dijkstra_shortest_time("N0", "N24", graph_nodes, adjacency, weather_map_clear, {})
-    
-    # Very tight fuel budget: Baseline time * 1.5 + small buffer
-    baseline_fuel = optimal_clear_time * 1.5 + 20.0
+    optimal_clear_time = dijkstra_shortest_time("N0", "N15", graph_nodes, adjacency, weather_map_clear, {})
+
+    # Fuel budget: generous to allow exploration mistakes
+    baseline_fuel = optimal_clear_time * 2.0 + 50.0
 
     all_tasks = {
         "1_easy_clear_path": ScenarioTemplate(
             name="1_easy_clear_path",
-            description="25-Node Grid: Clear path to N24.",
-            start_node="N0", destination_node="N24",
-            deadline_minutes=optimal_clear_time + 40,
-            initial_fuel=baseline_fuel,
+            description="Clear skies, light traffic. Find the shortest path from N0 to N15.",
+            start_node="N0", destination_node="N15",
+            deadline_minutes=optimal_clear_time * 2 + 100,
+            initial_fuel=baseline_fuel * 1.5,
             initial_weather={"NW": "Clear", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
         ),
         "2_medium_congestion": ScenarioTemplate(
             name="2_medium_congestion",
-            description="25-Node Grid: Severe traffic on the diagonal.",
-            start_node="N0", destination_node="N24",
-            deadline_minutes=optimal_clear_time + 60,
-            initial_fuel=baseline_fuel + 30,
+            description="Severe traffic blocks the central corridor. Find an efficient detour.",
+            start_node="N0", destination_node="N15",
+            deadline_minutes=optimal_clear_time * 2 + 60,
+            initial_fuel=baseline_fuel * 1.3,
             initial_weather={"NW": "Clear", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
-            traffic_schedule=[TrafficEvent(0, "N6->N7", "Severe", 999)],
+            traffic_schedule=[TrafficEvent(0, "N5->N6", "Severe", 999)],
         ),
         "3_hard_strategic_wait": ScenarioTemplate(
             name="3_hard_strategic_wait",
-            description="25-Node Grid: Storm clears up halfway.",
-            start_node="N0", destination_node="N24",
-            deadline_minutes=optimal_clear_time + 80,
-            initial_fuel=baseline_fuel + 20,
+            description="Storm blocks NW region at start but clears mid-episode. Wait or detour?",
+            start_node="N0", destination_node="N15",
+            deadline_minutes=optimal_clear_time * 2 + 80,
+            initial_fuel=baseline_fuel * 1.2,
             initial_weather={"NW": "Storm", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
             weather_schedule=[WeatherEvent(40, "NW", "Clear")],
         ),
         "4_frontier_greedy_trap": ScenarioTemplate(
             name="4_frontier_greedy_trap",
-            description="25-Node Grid: Approaching storm traps greedy routing.",
-            start_node="N0", destination_node="N24",
-            deadline_minutes=optimal_clear_time + 50,
+            description="Storm hits SE mid-route, trapping greedy agents near the destination.",
+            start_node="N0", destination_node="N15",
+            deadline_minutes=optimal_clear_time * 2 + 40,
             initial_fuel=baseline_fuel,
             initial_weather={"NW": "Clear", "NE": "Clear", "SW": "Clear", "SE": "Clear"},
-            weather_schedule=[WeatherEvent(30, "SE", "Storm"), WeatherEvent(180, "SE", "Clear")],
-        ),
-        "5_impossible_dynamic_maze": ScenarioTemplate(
-            name="5_impossible_dynamic_maze",
-            description="25-Node Grid: Fuel is critical and routing requires exact waiting.",
-            start_node="N0", destination_node="N24",
-            deadline_minutes=optimal_clear_time + 75,
-            initial_fuel=baseline_fuel + 5,  # Very tight fuel!
-            initial_weather={"NW": "Clear", "NE": "Storm", "SW": "Storm", "SE": "Storm"},
-            weather_schedule=[WeatherEvent(60, "SE", "Clear")],
-            traffic_schedule=[TrafficEvent(0, "N5->N10", "Severe", 100)],
+            weather_schedule=[WeatherEvent(25, "SE", "Storm"), WeatherEvent(150, "SE", "Clear")],
         ),
     }
 
     return graph_nodes, adjacency, node_to_region, weather_regions, all_tasks
 
-# Generate a default static instance for global imports to satisfy legacy code
+# Generate a default static instance for global imports
 GRAPH_NODES, ADJACENCY, NODE_TO_REGION, WEATHER_REGIONS, ALL_TASKS = generate_graph(42)

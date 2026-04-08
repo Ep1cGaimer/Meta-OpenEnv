@@ -1,13 +1,13 @@
 """
 Inference script for the Supply Chain Logistics Router.
 
-Runs the LLM agent through all 3 task scenarios, logging in the exact
+Runs the LLM agent through all 4 task scenarios, logging in the exact
 [START]/[STEP]/[END] format required by the hackathon evaluator.
 
-Env vars:
-    API_BASE_URL   LLM endpoint (default: Ollama local)
-    MODEL_NAME     Model ID (default: gemma4:e4b)
-    HF_TOKEN       API key (optional for Ollama)
+Env vars (set by evaluator):
+    API_BASE_URL   LLM endpoint
+    MODEL_NAME     Model ID
+    HF_TOKEN       API key
     IMAGE_NAME     Docker image name (if using from_docker_image)
 """
 
@@ -16,6 +16,7 @@ import json
 import os
 import re
 import textwrap
+import time
 from typing import List, Optional
 
 from openai import OpenAI
@@ -27,15 +28,20 @@ from client import RouterEnv
 from models import RouterAction
 
 IMAGE_NAME = os.getenv("IMAGE_NAME")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "ollama"
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:11434/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "gemma-aggressive")
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 BENCHMARK = "logistics_router"
-MAX_STEPS = 20
+MAX_STEPS = 12
 TEMPERATURE = 0.3
 MAX_TOKENS = 100
 
-ALL_TASK_NAMES = ["1_easy_clear_path", "2_medium_congestion", "3_hard_strategic_wait", "4_frontier_greedy_trap", "5_impossible_dynamic_maze"]
+ALL_TASK_NAMES = [
+    "1_easy_clear_path",
+    "2_medium_congestion",
+    "3_hard_strategic_wait",
+    "4_frontier_greedy_trap",
+]
 
 SYSTEM_PROMPT = textwrap.dedent("""
 You are a logistics route dispatcher. Each turn you receive a situation report
@@ -79,8 +85,6 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 # LLM interaction
 # ---------------------------------------------------------------------------
 
-import time
-
 REQUEST_DELAY = float(os.getenv("REQUEST_DELAY", "0"))
 
 
@@ -91,7 +95,7 @@ def parse_llm_response(text: str) -> RouterAction:
     """
     clean = text.strip()
 
-    # Strip markdown fences (```json ... ```) that Gemini/Llama often wrap around JSON
+    # Strip markdown fences (```json ... ```) that models often wrap around JSON
     if clean.startswith("```"):
         lines = clean.splitlines()
         if len(lines) >= 2:
@@ -178,11 +182,11 @@ async def run_task(llm_client: OpenAI, env: RouterEnv, task_name: str) -> None:
             if done:
                 break
 
-            # Configurable delay to stay under API rate limits (e.g. REQUEST_DELAY=4 for Gemini free tier)
+            # Configurable delay to stay under API rate limits
             if REQUEST_DELAY > 0:
                 time.sleep(REQUEST_DELAY)
 
-        # Final score is the reward from the last step (which is the episode final score on arrival)
+        # Final score is the reward from the last step (episode final score on arrival)
         score = rewards[-1] if rewards else 0.0
         score = max(0.0, min(1.0, score))
         success = score > 0.1
