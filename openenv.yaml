@@ -1,7 +1,23 @@
 spec_version: 1
-name: router
+name: incident_response
+version: "1.0.0"
+description: "Production incident response benchmark — on-call SRE agent evaluation"
 type: space
 runtime: fastapi
 app: server.app:app
 port: 8000
+max_steps: 15
 
+tasks:
+  - id: 1_easy_payment_deploy
+    difficulty: easy
+    baseline_score: 0.65
+  - id: 2_medium_db_conn_leak
+    difficulty: medium
+    baseline_score: 0.45
+  - id: 3_hard_dual_failure
+    difficulty: hard
+    baseline_score: 0.30
+  - id: 4_frontier_cache_corruption
+    difficulty: frontier
+    baseline_score: 0.15

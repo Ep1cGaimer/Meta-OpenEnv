@@ -9,9 +9,9 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openenv-router"
+name = "openenv-incident-response"
 version = "0.1.0"
-description = "Supply Chain Logistics Router — an RL environment for route planning under dynamic weather and traffic"
+description = "Production Incident Response — an OpenEnv benchmark for on-call SRE decision-making under cascading failures"
 requires-python = ">=3.10"
 dependencies = [
     "openenv-core[core]>=0.2.2",
@@ -28,10 +28,9 @@ dev = [
 ]
 
 [project.scripts]
-# Server entry point for local runs and package installs.
 server = "server.app:main"
 
 [tool.setuptools]
 include-package-data = true
 packages = ["server"]
-py-modules = ["client", "graph", "models", "tasks", "main"]
+py-modules = ["client", "service_graph", "scenarios", "models", "tasks", "main"]

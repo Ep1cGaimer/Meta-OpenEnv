@@ -1,8 +1,8 @@
 """
-Data models for the Supply Chain Logistics Router Environment.
+Data models for the Incident Response Environment.
 
 Defines the Action the LLM agent sends, the Observation it receives back,
-and a helper RouteOption model describing each adjacent route.
+and helper models for service status, findings, and alerts.
 """
 
 from typing import Optional
@@ -11,44 +11,108 @@ from openenv.core.env_server.types import Action, Observation
 from pydantic import BaseModel, Field
 
 
-class RouterAction(Action):
-    """What the agent can do each turn: move to an adjacent node, or wait."""
+class IncidentAction(Action):
+    """What the agent can do each turn.
 
-    action_type: str = Field(..., description="'move' or 'wait'")
-    target_node: str = Field(default="", description="Adjacent node ID (required for 'move')")
-    wait_minutes: int = Field(default=10, description="10 or 20 (only used for 'wait')")
-
-
-class RouteOption(BaseModel):
-    """Describes one adjacent route visible to the agent."""
-
-    to_node: str
-    base_travel_time_minutes: int
-    traffic_delay_minutes: int
-    weather: str              # Clear, LightRain, HeavyRain, Storm
-    risk_level: str           # Low, Medium, High, Blocked
-    edge_status: str          # open, degraded, blocked
-    eta_to_next_node: int     # base + traffic + weather penalty
-    trend: str                # improving, stable, worsening
-    fuel_cost_estimate: float # Est fuel cost to traverse
-
-
-class RouterObservation(Observation):
-    """
-    What the agent sees after each step.
-
-    The 'message' field is the LLM-readable natural language summary —
-    this is what gets fed directly into the LLM prompt during inference.
+    action_type choices:
+        investigate     — Get overview of a service (team, deploys, deps)
+        check_logs      — Read recent log lines for a service
+        check_metrics   — Query live metrics for a service
+        restart         — Restart a service
+        scale           — Scale up a service's replicas
+        rollback        — Roll back a service to the previous version
+        escalate        — Escalate to a specialist team
+        communicate     — Post a stakeholder status update
+        resolve         — Declare the incident resolved (terminal)
     """
 
-    truck_location: str = ""
-    destination: str = ""
-    time_remaining_minutes: int = 0
+    action_type: str = Field(
+        ...,
+        description=(
+            "'investigate', 'check_logs', 'check_metrics', "
+            "'restart', 'scale', 'rollback', "
+            "'escalate', 'communicate', 'resolve'"
+        ),
+    )
+    target_service: str = Field(
+        default="",
+        description="Service to act on (required for investigate/check_logs/check_metrics/restart/scale/rollback)",
+    )
+    message_type: str = Field(
+        default="investigating",
+        description="For communicate: 'investigating', 'update', 'mitigated', 'resolved'",
+    )
+    escalation_target: str = Field(
+        default="",
+        description="For escalate: 'database-team', 'platform-team', 'commerce-team', 'security-team'",
+    )
+
+
+class Alert(BaseModel):
+    """An active alert fired by the monitoring system."""
+
+    severity: str   # CRITICAL, WARNING, INFO
+    service: str
+    message: str
+
+
+class Finding(BaseModel):
+    """A piece of evidence the agent discovered during investigation."""
+
+    source: str         # Service or action that produced this
+    finding_type: str   # log_analysis, metric_anomaly, deploy_correlation, dependency_issue
+    summary: str        # Human-readable summary
+
+
+class ServiceStatus(BaseModel):
+    """Observable status of a single service."""
+
+    name: str
+    health: str             # healthy, degraded, failing, down
+    error_rate: float
+    p99_latency_ms: int
+    cpu_percent: float
+    memory_percent: float
+    qps: int
+    replicas: int
+    last_deploy: str        # e.g. "12 minutes ago"
+    version: str
+
+
+class IncidentObservation(Observation):
+    """What the agent sees after each step.
+
+    The 'message' field is the natural-language summary fed directly
+    into the LLM prompt during inference.
+    """
+
+    # Incident context
+    incident_id: str = ""
+    incident_summary: str = ""
+    severity: str = ""          # P1, P2, P3
+
+    # Time
+    sla_remaining_minutes: int = 0
     elapsed_minutes: int = 0
-    fuel_remaining: float = 0.0
-    route_options: list[RouteOption] = Field(default_factory=list)
-    available_actions: list[str] = Field(default_factory=list)
+    investigation_budget: float = 0.0
+
+    # Alerts
+    active_alerts: list[Alert] = Field(default_factory=list)
+
+    # Discovered information
+    services_investigated: list[str] = Field(default_factory=list)
+    findings: list[Finding] = Field(default_factory=list)
+    visible_services: list[ServiceStatus] = Field(default_factory=list)
+
+    # Actions taken
+    mitigations_applied: list[str] = Field(default_factory=list)
+    escalations_made: list[str] = Field(default_factory=list)
+    communications_sent: int = 0
+
+    # Action feedback
     last_action_summary: str = ""
     last_action_error: str = ""
-    alerts: list[str] = Field(default_factory=list)
-    message: str = ""  # LLM-readable observation — the core interface to the agent
+    available_actions: list[str] = Field(default_factory=list)
+
+    # LLM-readable observation
+    message: str = ""
