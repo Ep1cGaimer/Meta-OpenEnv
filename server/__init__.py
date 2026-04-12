@@ -4,8 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Router environment server components."""
+"""Incident Response environment server components."""
 
-from .router_environment import RouterEnvironment
+from .incident_environment import IncidentEnvironment
 
-__all__ = ["RouterEnvironment"]
+__all__ = ["IncidentEnvironment"]

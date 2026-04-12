@@ -5,9 +5,9 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-FastAPI application for the Router Environment.
+FastAPI application for the Incident Response Environment.
 
-This module creates an HTTP server that exposes the RouterEnvironment
+This module creates an HTTP server that exposes the IncidentEnvironment
 over HTTP and WebSocket endpoints, compatible with EnvClient.
 
 Endpoints:
@@ -36,19 +36,19 @@ except Exception as e:  # pragma: no cover
     ) from e
 
 try:
-    from ..models import RouterAction, RouterObservation
-    from .router_environment import RouterEnvironment
+    from ..models import IncidentAction, IncidentObservation
+    from .incident_environment import IncidentEnvironment
 except ImportError:
-    from models import RouterAction, RouterObservation
-    from server.router_environment import RouterEnvironment
+    from models import IncidentAction, IncidentObservation
+    from server.incident_environment import IncidentEnvironment
 
 
 # Create the app with web interface and README integration
 app = create_app(
-    RouterEnvironment,
-    RouterAction,
-    RouterObservation,
-    env_name="router",
+    IncidentEnvironment,
+    IncidentAction,
+    IncidentObservation,
+    env_name="incident_response",
     max_concurrent_envs=1,  # increase this number to allow more concurrent WebSocket sessions
 )
 
@@ -60,7 +60,7 @@ def main(host: str = "0.0.0.0", port: int = 8000):
     This function enables running the server without Docker:
         uv run --project . server
         uv run --project . server --port 8001
-        python -m router.server.app
+        python -m server.app
 
     Args:
         host: Host address to bind to (default: "0.0.0.0")
@@ -68,7 +68,7 @@ def main(host: str = "0.0.0.0", port: int = 8000):
 
     For production deployments, consider using uvicorn directly with
     multiple workers:
-        uvicorn router.server.app:app --workers 4
+        uvicorn server.app:app --workers 4
     """
     import uvicorn
 

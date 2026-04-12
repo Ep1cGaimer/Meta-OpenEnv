@@ -5,8 +5,8 @@
 # LICENSE file in the root directory of this source tree.
 
 [build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "openenv-incident-response"
@@ -30,7 +30,5 @@ dev = [
 [project.scripts]
 server = "server.app:main"
 
-[tool.setuptools]
-include-package-data = true
+[tool.hatch.build.targets.wheel]
 packages = ["server"]
-py-modules = ["client", "service_graph", "scenarios", "models", "tasks", "main"]
